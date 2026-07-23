@@ -23,12 +23,7 @@ startup
     dynamic[,] _settings =
     {
         { "FE", true, "Fading Echo - Full Game", null },
-            { "ZONES", true, "Zone splits", "FE" },
-                { "Reach_Bastion", true, "Reach Bastion", "ZONES" },
-                { "Reach_Tree",    true, "Reach Big Tree", "ZONES" },
-                { "Reach_Volcano", true, "Reach Volcano", "ZONES" },
-                { "Reach_Quarry",  true, "Reach Quarry", "ZONES" },
-                { "Reach_Wonder",  true, "Reach Wonder", "ZONES" },
+            // Default run = 12 sources + final boss + credits.
             { "SOURCES", true, "Source splits (one per source activated)", "FE" },
                 { "Src1",  true, "Source 1 activated",  "SOURCES" },
                 { "Src2",  true, "Source 2 activated",  "SOURCES" },
@@ -42,7 +37,15 @@ startup
                 { "Src10", true, "Source 10 activated", "SOURCES" },
                 { "Src11", true, "Source 11 activated", "SOURCES" },
                 { "Src12", true, "Source 12 activated", "SOURCES" },
-            { "Credits",         true,  "End of run (credits)", "FE" },
+            { "FinalBoss", true, "Final boss (all sources connected)", "FE" },
+            { "Credits",   true, "End of run (credits)", "FE" },
+            // Zone splits: OFF by default (enable if you want a per-zone run).
+            { "ZONES", false, "Zone splits (optional)", "FE" },
+                { "Reach_Bastion", false, "Reach Bastion", "ZONES" },
+                { "Reach_Tree",    false, "Reach Big Tree", "ZONES" },
+                { "Reach_Volcano", false, "Reach Volcano", "ZONES" },
+                { "Reach_Quarry",  false, "Reach Quarry", "ZONES" },
+                { "Reach_Wonder",  false, "Reach Wonder", "ZONES" },
             { "ResetOnMainMenu", false, "Reset when returning to the main menu", "FE" }
     };
     vars.Uhara.Settings.Create(_settings);
@@ -62,6 +65,9 @@ init
 
     // End of game.
     vars.Events.FunctionFlag("Credits", "WBP_CreditsScreen_C", "*WBP_CreditsScreen_C*", "StartCredits");
+
+    // Final boss: all 12 sources connected (opens the fight).
+    vars.Events.FunctionFlag("AllSources", "YGRO_Global_Gameplay_C", "*YGRO_Global_Gameplay_C*", "AllSourcesConnected");
 
     // Source-activation candidates - hook them all, we log whichever fires.
     vars.Events.FunctionFlag("Src_Active",  "BP_BastionCenter_C",     "*BP_BastionCenter_C*",     "ActiveSourceCrystal");
@@ -128,11 +134,16 @@ split
         else if (current.LevelZone == 3) zkey = "Reach_Quarry";
         else if (current.LevelZone == 4) zkey = "Reach_Wonder";
 
+        // Only advances when the zone's box is ticked (off by default). If off,
+        // we mark it and fall through (so a same-tick source event still counts).
         if (zkey != null && !vars.Splits.Contains(zkey))
         {
             vars.Splits.Add(zkey);
-            vars.Uhara.Log(">>> SPLIT " + zkey);
-            return settings[zkey];
+            if (settings.ContainsKey(zkey) && settings[zkey])
+            {
+                vars.Uhara.Log(">>> SPLIT " + zkey);
+                return true;
+            }
         }
     }
 
@@ -155,6 +166,17 @@ split
             string key = "Src" + vars.SourceCount;
             vars.Uhara.Log(">>> SPLIT " + key + " (source activated)");
             if (settings.ContainsKey(key)) return settings[key];
+        }
+    }
+
+    // ---- Final boss: all 12 sources connected -----------------------------
+    if (vars.Resolver.CheckFlag("AllSources") && !vars.Splits.Contains("FinalBoss"))
+    {
+        vars.Splits.Add("FinalBoss");
+        if (settings["FinalBoss"])
+        {
+            vars.Uhara.Log(">>> SPLIT FinalBoss");
+            return true;
         }
     }
 
