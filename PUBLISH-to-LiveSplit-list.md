@@ -2,17 +2,39 @@
 
 LiveSplit fetches its autosplitter suggestions from one file:
 `LiveSplit/LiveSplit.AutoSplitters` → `LiveSplit.AutoSplitters.xml`.
-To make **this** full-game script appear (and be downloadable) for the game
-"Fading Echo", add an entry that points at this repo's raw `.asl` URL.
 
-## The entry to add
+## Key facts (checked against the live list)
 
-There is already a "Fading Echo" entry (streetbackguy's demo). Two options:
+- The list has **2580 entries / 4330 game names, with zero duplicate game
+  names** — so there can only be **one entry per game**. "Fading Echo" already
+  exists (streetbackguy's demo autosplitter).
+- **But one entry can hold several `.asl` scripts.** 3 entries already do this,
+  and one of them is the exact analogue of our case — two autosplitters by two
+  different authors under a single entry:
 
-### Option A — a separate entry (keeps the demo one too)
+```xml
+<AutoSplitter>
+    <Games>
+        <Game>Shady Knight</Game>
+        <Game>Shady Knight Demo</Game>
+    </Games>
+    <URLs>
+        <URL>...Supahsemmie/SK_LoadlessSplitter.asl</URL>
+        <URL>...10-days-till-xmas/SK_splitter.asl</URL>
+        <URL>...asl-help</URL>
+    </URLs>
+    <Type>Script</Type>
+    <Description>Two autosplitters available: RT without loads (non-demo only) (by Supahsemmie) and IGT-only (by 10_days_till_xmas).</Description>
+</AutoSplitter>
+```
 
-Add a new `<AutoSplitter>` block, e.g. under a distinct game name so both show
-up:
+So the demo script and this full-game script can coexist in the single
+"Fading Echo" entry, with the description telling runners which is which.
+
+## The entry to use
+
+Replace the existing "Fading Echo" block with this (demo script kept first,
+full-game script added, `uhara10` component last):
 
 ```xml
 <AutoSplitter>
@@ -20,33 +42,33 @@ up:
         <Game>Fading Echo</Game>
     </Games>
     <URLs>
-        <URL>https://raw.githubusercontent.com/cheapmanga/FadingEcho-Autosplitter/main/Fading%20Echo/LiveSplit.FadingEcho.FullGame.asl</URL>
+        <URL>https://raw.githubusercontent.com/streetbackguy/Autosplitter-Projects/refs/heads/main/Fading%20Echo/LiveSplit.FadingEcho.asl</URL>
+        <URL>https://raw.githubusercontent.com/cheapmanga/FadingEcho-Autosplitter/refs/heads/main/Fading%20Echo/LiveSplit.FadingEcho.FullGame.asl</URL>
         <URL>https://github.com/ru-mii/uhara/raw/refs/heads/main/bin/uhara10</URL>
     </URLs>
     <Type>Script</Type>
-    <Description>Full-game Load Remover, Autosplitting, Autostart and Autoreset</Description>
+    <Description>Two autosplitters available: Demo (by Streetbackguy) and Full Game (by cheapmanga). Load Remover, Autosplitting, Autostart and Autoreset.</Description>
 </AutoSplitter>
 ```
 
-> Note: LiveSplit keys entries by `<Game>` name. Two entries with the same
-> `<Game>` value will conflict in the picker, so if you want BOTH the demo and
-> full-game splitters listed, coordinate with streetbackguy — the cleanest is a
-> single entry pointing at whichever script should be the default, or a combined
-> script. For your own use you do NOT need this list at all (the Layout
-> component works directly with the local file).
-
-### Option B — replace / update the existing entry
-
-If it should simply become the maintained Fading Echo autosplitter, edit the
-existing `<Game>Fading Echo</Game>` block's first `<URL>` to the raw URL above,
-keeping the `uhara10` URL.
+Both raw-URL forms work (`/refs/heads/main/` and `/main/`); the `refs/heads`
+form matches the style already used in the list.
 
 ## How to submit
 
 1. Fork `https://github.com/LiveSplit/LiveSplit.AutoSplitters`.
-2. Edit `LiveSplit.AutoSplitters.xml` with the block above.
-3. Open a Pull Request describing it as the full-game Fading Echo autosplitter.
+2. Edit `LiveSplit.AutoSplitters.xml`, replacing the `Fading Echo` block.
+3. Open a Pull Request.
 
-Until (or instead of) that PR is merged, anyone can use the script by adding a
-**Scriptable Auto Splitter** component in their LiveSplit layout and pointing it
-at the raw URL or a downloaded copy — no list entry required.
+## After it's merged
+
+You never touch the list again. The entry points at this repo's raw URL, so
+**any update you push here is picked up automatically** by LiveSplit — no new
+PR needed. The only thing that would require another PR is **renaming or moving
+the `.asl`** (that changes the URL), so keep the path
+`Fading Echo/LiveSplit.FadingEcho.FullGame.asl` on `main` stable.
+
+## Not required for personal use
+
+None of this is needed to simply *use* the script: add a **Scriptable Auto
+Splitter** component in your LiveSplit layout and point it at the local `.asl`.
