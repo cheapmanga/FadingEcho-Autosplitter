@@ -32,18 +32,76 @@ this is the full-game counterpart.
 4. Right-click LiveSplit → **Compare Against** → **Game Time** (required for
    load removal to be visible).
 
-## How the splits work (important)
+## What your splits should look like
 
-Each ticked milestone advances LiveSplit by **one segment**, in the order the
-game fires them. So:
+A ready-made splits file is included:
+**[`Fading Echo/Fading Echo - Sources.lss`](Fading%20Echo/Fading%20Echo%20-%20Sources.lss)**
+— just open it in LiveSplit (**Open Splits → From File…**) and you're set.
 
-- Zone splits fire **in the order you visit the zones**, not in a fixed zone
-  order. Enable only the zones your route goes through, and lay out your splits
-  file (`.lss`) segments **in your route order**.
-- The number of ticked milestones must equal the number of segments in your
-  `.lss`.
+### Default layout — 14 segments
 
-Tick / untick milestones in the component settings (each has a tooltip).
+This matches the script's default settings (12 sources + final boss + credits):
+
+| # | Segment name | Splits when… |
+|---|---|---|
+| 1 | `Source 1` | you activate your **1st** Aetheric source |
+| 2 | `Source 2` | you activate your 2nd source |
+| 3 | `Source 3` | 3rd source |
+| 4 | `Source 4` | 4th source |
+| 5 | `Source 5` | 5th source |
+| 6 | `Source 6` | 6th source |
+| 7 | `Source 7` | 7th source |
+| 8 | `Source 8` | 8th source |
+| 9 | `Source 9` | 9th source |
+| 10 | `Source 10` | 10th source |
+| 11 | `Source 11` | 11th source |
+| 12 | `Source 12` | your **12th / last** source |
+| 13 | `Final Boss` | all 12 sources connected → the final fight opens |
+| 14 | `Credits` | the end credits start |
+
+In LiveSplit it looks like this:
+
+```
+┌──────────────────────────────┐
+│  Fading Echo                 │
+│  Any% (Sources)              │
+├──────────────────────────────┤
+│  Source 1              1:24  │
+│  Source 2              3:07  │
+│  Source 3              4:52  │
+│      …                       │
+│  Source 12            22:41  │
+│  Final Boss           24:18  │
+│  Credits              26:03  │
+├──────────────────────────────┤
+│                   26:03.55   │
+└──────────────────────────────┘
+```
+
+> `Source 1` means **the first source you activate**, not one specific source in
+> the world. So activate them in the **same order every run** and your segment
+> times stay comparable.
+
+### Alternative — zone layout
+
+If you'd rather split per region, untick the source boxes and tick the zone
+ones instead. Then your segments should be, **in your own route order**:
+
+| # | Segment name |
+|---|---|
+| 1 | `Bastion` |
+| 2 | *1st outer zone you visit* |
+| 3 | *2nd outer zone* |
+| 4 | *3rd outer zone* |
+| 5 | *4th outer zone* |
+| 6 | `Credits` |
+
+### The one rule
+
+**Number of ticked milestones = number of segments in your `.lss`**, in the
+order the game fires them. Each ticked milestone advances LiveSplit by exactly
+one segment. Tick / untick them in the component settings (every box has a
+tooltip explaining it).
 
 ## Requirements
 
