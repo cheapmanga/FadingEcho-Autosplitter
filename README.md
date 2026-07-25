@@ -9,6 +9,15 @@ this is the full-game counterpart.
 
 **File:** [`Fading Echo/LiveSplit.FadingEcho.FullGame.asl`](Fading%20Echo/LiveSplit.FadingEcho.FullGame.asl)
 
+> ## ✅ Now on the official LiveSplit autosplitter list
+>
+> You don't need to download anything manually. In LiveSplit, open
+> **Edit Splits**, set **Game Name** to **`Fading Echo`**, and click
+> **Activate** — LiveSplit downloads this script for you.
+>
+> **Running the demo instead?** Set the Game Name to **`Fading Echo Demo`** to
+> get streetbackguy's demo autosplitter.
+
 ---
 
 ## Features
@@ -24,13 +33,25 @@ this is the full-game counterpart.
 
 ## Install
 
+### Easiest — from the LiveSplit list (recommended)
+
+1. Right-click LiveSplit → **Edit Splits**.
+2. **Game Name:** type **`Fading Echo`** → click **Activate**.
+   (For the demo, use **`Fading Echo Demo`** instead.)
+3. Right-click LiveSplit → **Compare Against** → **Game Time** (required for
+   load removal to be visible).
+
+That's it — LiveSplit downloads the script and the `uhara10` component itself,
+and updates automatically when this repo changes.
+
+### Manual (if you'd rather use a local copy)
+
 1. Put **`uhara10`** (from the [Uhara releases](https://github.com/ru-mii/uhara/tree/main/bin))
    into LiveSplit's `Components` folder (exact name `uhara10`, no extension).
 2. Download `LiveSplit.FadingEcho.FullGame.asl` from this repo.
 3. In LiveSplit: right-click → **Edit Layout** → `+` → **Control** →
    **Scriptable Auto Splitter** → **Browse** to the `.asl`.
-4. Right-click LiveSplit → **Compare Against** → **Game Time** (required for
-   load removal to be visible).
+4. Right-click LiveSplit → **Compare Against** → **Game Time**.
 
 ## What your splits should look like
 
