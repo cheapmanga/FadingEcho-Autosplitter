@@ -33,8 +33,6 @@ this is the full-game counterpart.
 
 ## Install
 
-### Easiest — from the LiveSplit list (recommended)
-
 1. Right-click LiveSplit → **Edit Splits**.
 2. **Game Name:** type **`Fading Echo`** → click **Activate**.
    (For the demo, use **`Fading Echo Demo`** instead.)
@@ -42,22 +40,14 @@ this is the full-game counterpart.
    load removal to be visible).
 
 That's it — LiveSplit downloads the script and the `uhara10` component itself,
-and updates automatically when this repo changes.
-
-### Manual (if you'd rather use a local copy)
-
-1. Put **`uhara10`** (from the [Uhara releases](https://github.com/ru-mii/uhara/tree/main/bin))
-   into LiveSplit's `Components` folder (exact name `uhara10`, no extension).
-2. Download `LiveSplit.FadingEcho.FullGame.asl` from this repo.
-3. In LiveSplit: right-click → **Edit Layout** → `+` → **Control** →
-   **Scriptable Auto Splitter** → **Browse** to the `.asl`.
-4. Right-click LiveSplit → **Compare Against** → **Game Time**.
+and updates automatically whenever the script is changed. Nothing to download by
+hand.
 
 ## What your splits should look like
 
-A ready-made splits file is included:
-**[`Fading Echo/Fading Echo - Sources.lss`](Fading%20Echo/Fading%20Echo%20-%20Sources.lss)**
-— just open it in LiveSplit (**Open Splits → From File…**) and you're set.
+Just build these segments in LiveSplit (**Edit Splits**). A ready-made file is
+also in this repo if you'd rather not type them:
+[`Fading Echo/Fading Echo - Sources.lss`](Fading%20Echo/Fading%20Echo%20-%20Sources.lss).
 
 ### Default layout — 14 segments
 
@@ -126,9 +116,12 @@ tooltip explaining it).
 
 ## Requirements
 
-- LiveSplit with the Scriptable Auto Splitter component.
-- The [Uhara](https://github.com/ru-mii/uhara) `uhara10` component.
+- LiveSplit.
 - Compare against **Game Time**.
+
+(The script and the [Uhara](https://github.com/ru-mii/uhara) `uhara10` component
+are downloaded by LiveSplit automatically when you Activate the game — you don't
+install anything by hand.)
 
 ## Credits
 
