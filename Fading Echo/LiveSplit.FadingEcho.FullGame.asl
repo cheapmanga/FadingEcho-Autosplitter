@@ -1,13 +1,33 @@
 // =============================================================================
 //  Fading Echo (Project Ygro) - Load Remover / Autosplitter - FULL GAME
-//  Minimal, null-safe (no casts), debug -> OutputDebugString (TraceSpy).
-//  Splits: zones (LevelZone) + each SOURCE activated + credits.
+//  v4 - source splits are driven by MissionFlow NODE STATE, not by function hooks.
+//  Verified against the UE4SS CXXHeaderDump of build 1.0.28121.
 //  Requires Uhara (Components/uhara10) + LiveSplit comparing against Game Time.
 //
-//  SOURCE DETECTION: we hook every function that could fire when you activate a
-//  Bastion source and LOG each one ("SOURCE EVENT: <name>") so the moment you
-//  activate a source, TraceSpy shows exactly which fired. The split is fired on
-//  any of them, debounced so several hooks for one activation = one split.
+//  WHY v4 EXISTS
+//  -------------
+//  v3 hooked gameplay functions and split on "MFSourceConnected". That hook is
+//  unreliable by construction: Uhara hooks UObject::ProcessEvent, which only
+//  sees events and delegate broadcasts - never direct Blueprint function calls.
+//  MFSourceConnected is not "a source was connected" at all: its signature is
+//  (NewState, PreviousState, Node, bDebug), i.e. it is a MissionFlow node
+//  state-change callback bound to ONE node. That is why it fired for the first
+//  source of a region and never again, and never at all for Wonder.
+//
+//  v4 reads the ground truth instead. Every source owns two MissionFlow nodes:
+//      MF_S_<Region>_<0..2>_U  -> source UNLOCKED (activated out in the world)
+//      MF_S_<Region>_<0..2>_C  -> source CONNECTED (Bastion connection sequence)
+//  A node is done when its CurrentState == 1 (Validated).
+//
+//  The 12 "_C" nodes are listed, in a fixed order, in
+//      PH_BP_PerkSystemInteraction::NodesConnection  (TArray<UMF_Node_C*> @0x378)
+//  as a Blueprint default value:
+//      Quarry 0/1/2, Tree 0/1/2, Volcano 0/1/2, Wonder 0/1/2.
+//  So we know both WHICH source each entry is and what state it is in.
+//  Each matching "_U" node is the sibling of its "_C" node (same parent).
+//
+//  Consequences: splits no longer care about the order you do the sources in,
+//  cannot be duplicated by a Bastion reload, and cannot be missed.
 // =============================================================================
 
 state("UE_YGRO_Steam-Win64-Shipping")
@@ -24,21 +44,27 @@ startup
     {
         { "FE", true, "Fading Echo - Full Game", null },
             // Default run = 12 sources + final boss + credits.
-            { "SOURCES", true, "Source splits (one per source activated)", "FE" },
-                { "Src1",  true, "Source 1 activated",  "SOURCES" },
-                { "Src2",  true, "Source 2 activated",  "SOURCES" },
-                { "Src3",  true, "Source 3 activated",  "SOURCES" },
-                { "Src4",  true, "Source 4 activated",  "SOURCES" },
-                { "Src5",  true, "Source 5 activated",  "SOURCES" },
-                { "Src6",  true, "Source 6 activated",  "SOURCES" },
-                { "Src7",  true, "Source 7 activated",  "SOURCES" },
-                { "Src8",  true, "Source 8 activated",  "SOURCES" },
-                { "Src9",  true, "Source 9 activated",  "SOURCES" },
-                { "Src10", true, "Source 10 activated", "SOURCES" },
-                { "Src11", true, "Source 11 activated", "SOURCES" },
-                { "Src12", true, "Source 12 activated", "SOURCES" },
-            { "FinalBoss", true, "Final boss (all sources connected)", "FE" },
-            { "Credits",   true, "End of run (credits)", "FE" },
+            // Splits are CHRONOLOGICAL: "Source 1" is the first source you do,
+            // whichever one it is. The log names the actual source.
+            { "SOURCES", true, "Source splits (one per source, in the order you do them)", "FE" },
+                { "Src1",  true, "Source 1",  "SOURCES" },
+                { "Src2",  true, "Source 2",  "SOURCES" },
+                { "Src3",  true, "Source 3",  "SOURCES" },
+                { "Src4",  true, "Source 4",  "SOURCES" },
+                { "Src5",  true, "Source 5",  "SOURCES" },
+                { "Src6",  true, "Source 6",  "SOURCES" },
+                { "Src7",  true, "Source 7",  "SOURCES" },
+                { "Src8",  true, "Source 8",  "SOURCES" },
+                { "Src9",  true, "Source 9",  "SOURCES" },
+                { "Src10", true, "Source 10", "SOURCES" },
+                { "Src11", true, "Source 11", "SOURCES" },
+                { "Src12", true, "Source 12", "SOURCES" },
+                // Which moment counts as "doing" a source. Default: the moment
+                // you activate it out in the world. Tick the other one to split
+                // on the Bastion connection sequence instead.
+                { "OnConnected", false, "...split on CONNECTION instead (Bastion connection sequence)", "SOURCES" },
+            { "FinalBoss", true, "Final boss (12/12 sources connected)", "FE" },
+            { "Credits",   true, "End of run (credits screen)", "FE" },
             // Zone splits: OFF by default (enable if you want a per-zone run).
             { "ZONES", false, "Zone splits (optional)", "FE" },
                 { "Reach_Bastion", false, "Reach Bastion", "ZONES" },
@@ -49,7 +75,24 @@ startup
             { "ResetOnMainMenu", false, "Reset when returning to the main menu", "FE" }
     };
     vars.Uhara.Settings.Create(_settings);
-    vars.Splits = new HashSet<string>();
+
+    // Fixed order of PH_BP_PerkSystemInteraction::NodesConnection (BP default).
+    vars.SourceNames = new string[] {
+        "Quarry 1", "Quarry 2", "Quarry 3",
+        "Tree 1",   "Tree 2",   "Tree 3",
+        "Volcano 1","Volcano 2","Volcano 3",
+        "Wonder 1", "Wonder 2", "Wonder 3"
+    };
+
+    // ---- offsets, build 1.0.28121 (all re-checked against the UE4SS dump) ----
+    vars.O_NodesConnection = 0x378;  // PH_BP_PerkSystemInteraction, TArray data ptr
+    vars.O_NodesConnNum    = 0x380;  // ...and its element count
+    vars.O_NodeParent      = 0x38;   // MF_Node_C::Parent
+    vars.O_NodeChildren    = 0x40;   // MF_Node_C::Children (TSet data ptr)
+    vars.O_NodeChildrenNum = 0x48;   // ...and its element count
+    vars.O_NodeState       = 0x128;  // MF_Node_C::CurrentState (E_MF_State, 1 byte)
+    vars.STATE_VALIDATED   = 1;      // E_MF_State: 0=Validable 1=Validated 2=Waiting
+                                     //             3=Disabled  4=Failed    5=Asleep
 }
 
 init
@@ -63,50 +106,181 @@ init
     vars.Resolver.Watch<uint>("CutsceneIndex", vars.Utils.GWorld, 0x1A8, 0x4C0, 0x380);
     vars.Uhara["CutsceneIndex"].FailAction = MemoryWatcher.ReadFailAction.SetZeroOrNull;
 
-    // End of game.
-    vars.Events.FunctionFlag("Credits", "WBP_CreditsScreen_C", "*WBP_CreditsScreen_C*", "StartCredits");
+    // The Bastion perk system owns the ordered list of the 12 "_C" nodes.
+    vars.PerkSlot = vars.Events.InstancePtr("PH_BP_PerkSystemInteraction_C", "*PH_BP_PerkSystemInteraction*");
 
-    // Final boss: all 12 sources connected (opens the fight).
-    vars.Events.FunctionFlag("AllSources", "YGRO_Global_Gameplay_C", "*YGRO_Global_Gameplay_C*", "AllSourcesConnected");
+    // End of run. The credits widget being CREATED is a far more dependable
+    // signal than hooking StartCredits (a plain BP call, invisible to a
+    // ProcessEvent hook), so watch the instance-creation counter as well.
+    vars.Resolver.Watch<ulong>("CreditsSpawn", vars.Events.InstanceFlag("WBP_CreditsScreen_C", "*WBP_CreditsScreen*"));
+    vars.Events.FunctionFlag("CreditsFunc", "WBP_CreditsScreen_C", "*WBP_CreditsScreen_C*", "StartCredits");
 
-    // Source-activation candidates - hook them all, we log whichever fires.
-    vars.Events.FunctionFlag("Src_Active",  "BP_BastionCenter_C",     "*BP_BastionCenter_C*",     "ActiveSourceCrystal");
-    vars.Events.FunctionFlag("Src_One",     "YGRO_Global_Gameplay_C", "*YGRO_Global_Gameplay_C*", "OneSourceConnected");
-    vars.Events.FunctionFlag("Src_MF",      "YGRO_Global_Gameplay_C", "*YGRO_Global_Gameplay_C*", "MFSourceConnected");
-    vars.Events.FunctionFlag("Src_Add",     "BP_FinalSourceCrystal_C","*BP_FinalSourceCrystal_C*","AddConnectedSource");
-    vars.Events.FunctionFlag("Src_Graph",   "BP_BastionCenter_C",     "*BP_BastionCenter_C*",     "OnSourcesGraphChanged");
-    vars.Events.FunctionFlag("Src_Connect", "YGRO_Global_Gameplay_C", "*YGRO_Global_Gameplay_C*", "RE_ConnectSourceTuto");
-
-    // All candidates are LOGGED. The split is driven by MFSourceConnected ONLY:
-    // the 2-source test proved it fires exactly once per source activated, in
-    // the zone where you activate it (Src_Graph was a Bastion graph-update that
-    // double-counted). Reload copies of it are still filtered by the 5 s
-    // post-zone-change guard below.
-    vars.SrcFlags      = new string[] { "Src_Active", "Src_One", "Src_MF", "Src_Add", "Src_Graph", "Src_Connect" };
-    vars.SrcSplitFlags = new string[] { "Src_MF" };
+    vars.NodesC   = new IntPtr[12];   // the 12 "_C" nodes, in NodesConnection order
+    vars.NodesU   = new IntPtr[12];   // their "_U" siblings, same order
+    vars.Done     = new bool[12];     // already split this run
+    vars.NodesReady = false;
+    vars.Splits   = new HashSet<string>();
     vars.SourceCount = 0;
-    vars.LastSourceTick = 0;
-    vars.LastZoneChangeTick = 0;
+    vars.Pending  = new List<string>(); // sources validated but not yet split
+
+    // Resolve the 12 "_C" nodes (and their "_U" siblings) from the perk system.
+    // Returns false until the Bastion - and therefore the perk system - exists.
+    Func<bool> resolveNodes = () =>
+    {
+        try
+        {
+            IntPtr perk = game.ReadPointer((IntPtr)vars.PerkSlot);
+            if (perk == IntPtr.Zero) return false;
+
+            IntPtr arr = game.ReadPointer(perk + (int)vars.O_NodesConnection);
+            int num    = game.ReadValue<int>(perk + (int)vars.O_NodesConnNum);
+            if (arr == IntPtr.Zero || num != 12) return false;
+
+            for (int i = 0; i < 12; i++)
+            {
+                IntPtr nodeC = game.ReadPointer(arr + 0x8 * i);
+                if (nodeC == IntPtr.Zero) return false;
+                vars.NodesC[i] = nodeC;
+
+                // The "_U" node is the other child of this node's parent.
+                vars.NodesU[i] = IntPtr.Zero;
+                IntPtr parent = game.ReadPointer(nodeC + (int)vars.O_NodeParent);
+                if (parent != IntPtr.Zero)
+                {
+                    IntPtr kids  = game.ReadPointer(parent + (int)vars.O_NodeChildren);
+                    int kidCount = game.ReadValue<int>(parent + (int)vars.O_NodeChildrenNum);
+                    if (kids != IntPtr.Zero && kidCount > 0 && kidCount <= 8)
+                    {
+                        // TSet element stride: value(8) + HashNextId(4) + HashIndex(4).
+                        // Each MF_S_<Zone>_<n> has exactly two children, "_U"
+                        // and "_C", so the sibling that is not our "_C" is the
+                        // "_U". Cross-check its Parent before trusting it, in
+                        // case we walked into a hole in the sparse array.
+                        for (int k = 0; k < kidCount; k++)
+                        {
+                            IntPtr kid = game.ReadPointer(kids + 0x10 * k);
+                            if (kid == IntPtr.Zero || kid == nodeC) continue;
+                            if (game.ReadPointer(kid + (int)vars.O_NodeParent) != parent) continue;
+                            vars.NodesU[i] = kid;
+                            break;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+        catch { return false; }
+    };
+    vars.ResolveNodes = resolveNodes;
+
+    // State byte of an arbitrary node. -1 means "not readable right now" and is
+    // never treated as progress.
+    Func<IntPtr, int> nodeState = (node) =>
+    {
+        try
+        {
+            if (node == IntPtr.Zero) return -1;
+            return game.ReadValue<byte>(node + (int)vars.O_NodeState);
+        }
+        catch { return -1; }
+    };
+    vars.NodeState = nodeState;
+
+    // State of source i for the moment the user picked. Default is "_U"
+    // (activated in the world); "_C" is the Bastion connection. If a "_U" node
+    // could not be resolved we fall back to its "_C" so the split is late
+    // rather than missing entirely - the resolve log says when that happens.
+    Func<int, int> sourceState = (i) =>
+    {
+        IntPtr nodeU = (IntPtr)vars.NodesU[i];
+        bool useConnected = (bool)settings["OnConnected"] || nodeU == IntPtr.Zero;
+        IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : nodeU;
+        return (int)vars.NodeState(node);
+    };
+    vars.SourceState = sourceState;
+
+    // The final fight opens on 12 CONNECTED sources, whatever the split mode is.
+    Func<int> connectedCount = () =>
+    {
+        int n = 0;
+        for (int i = 0; i < 12; i++)
+            if (vars.NodeState((IntPtr)vars.NodesC[i]) == (int)vars.STATE_VALIDATED) n++;
+        return n;
+    };
+    vars.ConnectedCount = connectedCount;
+
+    // Mark every already-done source as consumed, without splitting. Used at
+    // run start so loading a mid-game save does not fire a burst of splits.
+    Action rebase = () =>
+    {
+        int already = 0;
+        for (int i = 0; i < 12; i++)
+        {
+            bool done = (vars.SourceState(i) == (int)vars.STATE_VALIDATED);
+            vars.Done[i] = done;
+            if (done) already++;
+        }
+        vars.SourceCount = already;
+        vars.Pending.Clear();
+        vars.Uhara.Log("Baseline: " + already + "/12 sources already done at run start.");
+    };
+    vars.Rebase = rebase;
+
+    vars.Uhara.Log("=== Fading Echo autosplitter v4 (build 1.0.28121 offsets) ===");
 }
 
 update
 {
     vars.Uhara.Update();
 
-    if (old.LevelZone != current.LevelZone)
+    if (!vars.NodesReady)
     {
-        vars.Uhara.Log("LevelZone: " + old.LevelZone + " -> " + current.LevelZone);
-        vars.LastZoneChangeTick = Environment.TickCount;  // for source-noise filter
+        if (vars.ResolveNodes())
+        {
+            vars.NodesReady = true;
+            int missingU = 0;
+            vars.Uhara.Log("MissionFlow nodes resolved (12 sources). Splitting on "
+                + ((bool)settings["OnConnected"] ? "CONNECTION (_C)" : "ACTIVATION (_U)") + ".");
+            for (int i = 0; i < 12; i++)
+            {
+                if ((IntPtr)vars.NodesU[i] == IntPtr.Zero) missingU++;
+                vars.Uhara.Log("  [" + i + "] " + vars.SourceNames[i]
+                    + "  _C=0x" + ((IntPtr)vars.NodesC[i]).ToString("X")
+                    + "  _U=0x" + ((IntPtr)vars.NodesU[i]).ToString("X")
+                    + "  state=" + vars.SourceState(i));
+            }
+            if (missingU > 0)
+                vars.Uhara.Log("!! " + missingU + "/12 _U nodes unresolved - those sources "
+                    + "fall back to splitting on connection. Report this log.");
+            // Only meaningful if a run is already under way.
+            if (timer.CurrentPhase == TimerPhase.Running) vars.Rebase();
+        }
     }
+
+    if (old.LevelZone != current.LevelZone)
+        vars.Uhara.Log("LevelZone: " + old.LevelZone + " -> " + current.LevelZone);
     if (old.LoadingStep != current.LoadingStep)
         vars.Uhara.Log("LoadingStep: " + current.LoadingStep);
     if (old.CutsceneIndex != current.CutsceneIndex)
         vars.Uhara.Log("CutsceneIndex: " + current.CutsceneIndex);
 
-    // Log every source-candidate hook as it fires (works even before the run
-    // starts, so you can confirm detection just by activating a source).
-    foreach (var f in vars.SrcFlags)
-        if (vars.Resolver.CheckFlag(f)) vars.Uhara.Log("SOURCE EVENT: " + f);
+    // Detect newly validated sources. Queued rather than split immediately so
+    // two sources validating on the same tick still produce two splits.
+    if (vars.NodesReady && timer.CurrentPhase == TimerPhase.Running)
+    {
+        for (int i = 0; i < 12; i++)
+        {
+            if (vars.Done[i]) continue;
+            if (vars.SourceState(i) != (int)vars.STATE_VALIDATED) continue;
+
+            vars.Done[i] = true;
+            vars.SourceCount = (int)vars.SourceCount + 1;
+            string label = "Source " + vars.SourceCount + " = " + vars.SourceNames[i]
+                         + ((bool)settings["OnConnected"] ? " (connected)" : " (activated)");
+            vars.Uhara.Log(">>> " + label);
+            vars.Pending.Add("Src" + vars.SourceCount);
+        }
+    }
 }
 
 start
@@ -118,12 +292,37 @@ start
 onStart
 {
     vars.Splits.Clear();
-    vars.SourceCount = 0;
+    if (vars.NodesReady) vars.Rebase();
+    else { vars.SourceCount = 0; vars.Pending.Clear(); }
     timer.IsGameTimePaused = true;
 }
 
 split
 {
+    // ---- Source done ------------------------------------------------------
+    if (vars.Pending.Count > 0)
+    {
+        string key = vars.Pending[0];
+        vars.Pending.RemoveAt(0);
+        if (settings.ContainsKey(key) && settings[key])
+        {
+            vars.Uhara.Log(">>> SPLIT " + key);
+            return true;
+        }
+    }
+
+    // ---- Final boss: 12/12 CONNECTED (that is what opens the fight, whatever
+    //      moment the source splits are set to) --------------------------------
+    if (vars.NodesReady && !vars.Splits.Contains("FinalBoss") && vars.ConnectedCount() >= 12)
+    {
+        vars.Splits.Add("FinalBoss");
+        if (settings["FinalBoss"])
+        {
+            vars.Uhara.Log(">>> SPLIT FinalBoss");
+            return true;
+        }
+    }
+
     // ---- Zone reached (LevelZone) -----------------------------------------
     if (old.LevelZone != current.LevelZone)
     {
@@ -134,8 +333,6 @@ split
         else if (current.LevelZone == 3) zkey = "Reach_Quarry";
         else if (current.LevelZone == 4) zkey = "Reach_Wonder";
 
-        // Only advances when the zone's box is ticked (off by default). If off,
-        // we mark it and fall through (so a same-tick source event still counts).
         if (zkey != null && !vars.Splits.Contains(zkey))
         {
             vars.Splits.Add(zkey);
@@ -147,41 +344,9 @@ split
         }
     }
 
-    // ---- Source activated -------------------------------------------------
-    //   Fire on a source hook, but only when settled in a zone (>5 s since the
-    //   last zone change, which filters Bastion-reload noise) and debounced
-    //   (1.5 s, collapses the burst of hooks from one activation into 1 split).
-    bool srcFired = false;
-    foreach (var f in vars.SrcSplitFlags)
-        if (vars.Resolver.CheckFlag(f)) { srcFired = true; break; }
-
-    if (srcFired)
-    {
-        int now = Environment.TickCount;
-        if (now - (int)vars.LastZoneChangeTick > 5000
-            && now - (int)vars.LastSourceTick > 1500)
-        {
-            vars.LastSourceTick = now;
-            vars.SourceCount = (int)vars.SourceCount + 1;
-            string key = "Src" + vars.SourceCount;
-            vars.Uhara.Log(">>> SPLIT " + key + " (source activated)");
-            if (settings.ContainsKey(key)) return settings[key];
-        }
-    }
-
-    // ---- Final boss: all 12 sources connected -----------------------------
-    if (vars.Resolver.CheckFlag("AllSources") && !vars.Splits.Contains("FinalBoss"))
-    {
-        vars.Splits.Add("FinalBoss");
-        if (settings["FinalBoss"])
-        {
-            vars.Uhara.Log(">>> SPLIT FinalBoss");
-            return true;
-        }
-    }
-
-    // ---- End of game ------------------------------------------------------
-    if (vars.Resolver.CheckFlag("Credits") && !vars.Splits.Contains("Credits"))
+    // ---- End of run: credits ----------------------------------------------
+    bool creditsUp = vars.Resolver.CheckFlag("CreditsSpawn") || vars.Resolver.CheckFlag("CreditsFunc");
+    if (creditsUp && !vars.Splits.Contains("Credits"))
     {
         vars.Splits.Add("Credits");
         vars.Uhara.Log(">>> SPLIT Credits");

@@ -27,8 +27,10 @@ this is the full-game counterpart.
 - **Auto start** — starts on entering the Tutorial zone (new game).
 - **Zone splits** — one split each time you reach a gameplay zone (Bastion,
   Big Tree, Volcano, Quarry, Wonder).
-- **Source splits** — one split each time you activate an Aetheric source
-  (driven by the `MFSourceConnected` gameplay event).
+- **Source splits** — one split each time you activate an Aetheric source, in
+  whatever order you do them. Driven by MissionFlow node state, so a split can
+  neither be missed nor fired twice by a Bastion reload. You can switch to
+  splitting on the Bastion *connection* instead, in the component settings.
 - **Auto reset** — optional, on returning to the main menu.
 
 ## Install
