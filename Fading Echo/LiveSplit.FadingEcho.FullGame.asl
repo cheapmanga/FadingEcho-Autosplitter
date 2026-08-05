@@ -26,6 +26,10 @@
 //  So we know both WHICH source each entry is and what state it is in.
 //  Each matching "_U" node is the sibling of its "_C" node (same parent).
 //
+//  State is read from ABP_QuestManager_C::NodesStates, not from the node asset:
+//  MF_Node_C::CurrentState is session-local and reads 0 for work already done
+//  when a save is loaded. The quest manager's copy is the save-restored one.
+//
 //  Consequences: splits no longer care about the order you do the sources in,
 //  cannot be duplicated by a Bastion reload, and cannot be missed.
 // =============================================================================
@@ -94,14 +98,13 @@ startup
     vars.STATE_VALIDATED   = 1;      // E_MF_State: 0=Validable 1=Validated 2=Waiting
                                      //             3=Disabled  4=Failed    5=Asleep
 
-    // ---- TEMPORARY (test only) ------------------------------------------------
-    // MF_Node_C::CurrentState turned out to be SESSION-LOCAL: it starts at the
-    // asset default and is only updated for nodes that change during the current
-    // session. Loading a mid-game save leaves it at 0 for work already done, so
-    // both the baseline and the 12/12 boss condition read wrong. The persistent,
-    // save-restored copy lives in ABP_QuestManager_C::NodesStates, reached from
-    // the game mode - a path that exists at all times and needs no creation hook.
-    // Only needed to test the final boss split from a save; remove afterwards.
+    // Where node state is actually read from. MF_Node_C::CurrentState is
+    // SESSION-LOCAL: it starts at the asset default and only moves for nodes
+    // that change during the current session, so a loaded save reads 0 for work
+    // already done. The persistent, save-restored copy lives in
+    // ABP_QuestManager_C::NodesStates, reached from the game mode - a path that
+    // exists at all times and needs no creation hook. CurrentState is kept only
+    // as a fallback for when the quest manager cannot be found.
     vars.O_World_GameMode  = 0x1A8;  // UWorld -> AuthorityGameMode
     vars.O_GM_QuestCpt     = 0x408;  // BP_YgroGameMode::MF_QuestCpt
     vars.O_QC_Managers     = 0x110;  // MF_QuestCpt::Managers (TMap data ptr)
@@ -202,11 +205,10 @@ init
     };
     vars.NodeState = nodeState;
 
-    // ---- TEMPORARY (test only) ------------------------------------------------
     // Locate the quest manager that owns our 12 sources and remember, for each
     // node, its slot index in that manager's NodesStates map. We keep the index
     // rather than the address so a map reallocation cannot leave us reading a
-    // stale slot. Remove this block, StateAtIdx and their uses afterwards.
+    // stale slot.
     vars.QMgr    = IntPtr.Zero;
     vars.IdxC    = new int[12];
     vars.IdxU    = new int[12];
@@ -275,7 +277,6 @@ init
         catch { return -1; }
     };
     vars.StateAtIdx = stateAtIdx;
-    // ---- end TEMPORARY --------------------------------------------------------
 
     // State of source i for the moment the user picked. Default is "_U"
     // (activated in the world); "_C" is the Bastion connection. If a "_U" node
@@ -286,7 +287,7 @@ init
         IntPtr nodeU = (IntPtr)vars.NodesU[i];
         bool useConnected = (bool)settings["OnConnected"] || nodeU == IntPtr.Zero;
 
-        // TEMPORARY: prefer the quest manager's copy, which survives a save load.
+        // The quest manager's copy is the one that survives a save load.
         if ((bool)vars.QMReady)
         {
             int s = (int)vars.StateAtIdx(useConnected ? (int)vars.IdxC[i] : (int)vars.IdxU[i]);
@@ -305,7 +306,7 @@ init
         for (int i = 0; i < 12; i++)
         {
             int s = -1;
-            // TEMPORARY: same, prefer the save-restored copy.
+            // Same: prefer the save-restored copy.
             if ((bool)vars.QMReady) s = (int)vars.StateAtIdx((int)vars.IdxC[i]);
             if (s < 0) s = (int)vars.NodeState((IntPtr)vars.NodesC[i]);
             if (s == (int)vars.STATE_VALIDATED) n++;
@@ -353,8 +354,8 @@ update
         if (vars.ResolveNodes())
         {
             vars.NodesReady = true;
-            // TEMPORARY: must run BEFORE the states are read or baselined below,
-            // otherwise a loaded save is baselined from session-local values.
+            // Must run BEFORE the states are read or baselined below, or a
+            // loaded save gets baselined from session-local values.
             vars.QMReady = vars.ResolveQuestStates();
             vars.Uhara.Log(((bool)vars.QMReady)
                 ? "QuestManager found - reading save-restored node states."
@@ -377,8 +378,8 @@ update
             if (timer.CurrentPhase == TimerPhase.Running) vars.Rebase();
         }
     }
-    // TEMPORARY: the quest manager may spawn after the perk system; keep trying,
-    // but at most once a second - a full scan is thousands of reads.
+    // The quest manager may spawn after the perk system; keep trying, but at
+    // most once a second - a full scan is thousands of reads.
     else if (!(bool)vars.QMReady && Environment.TickCount - (int)vars.LastQMTry > 1000)
     {
         vars.LastQMTry = Environment.TickCount;
