@@ -97,6 +97,8 @@ startup
     vars.O_NodeState       = 0x128;  // MF_Node_C::CurrentState (E_MF_State, 1 byte)
     vars.STATE_VALIDATED   = 1;      // E_MF_State: 0=Validable 1=Validated 2=Waiting
                                      //             3=Disabled  4=Failed    5=Asleep
+    vars.STATE_MAX         = 5;      // anything above this is not a state at all,
+                                     // it is memory that no longer belongs to us
 
     // Where node state is actually read from. MF_Node_C::CurrentState is
     // SESSION-LOCAL: it starts at the asset default and only moves for nodes
@@ -199,7 +201,8 @@ init
         try
         {
             if (node == IntPtr.Zero) return -1;
-            return game.ReadValue<byte>(node + (int)vars.O_NodeState);
+            int s = game.ReadValue<byte>(node + (int)vars.O_NodeState);
+            return (s <= (int)vars.STATE_MAX) ? s : -1;   // anything else is not a state
         }
         catch { return -1; }
     };
@@ -213,6 +216,7 @@ init
     vars.IdxC    = new int[12];
     vars.IdxU    = new int[12];
     vars.QMReady = false;
+    vars.QMStale = false;
     vars.LastQMTry = 0;
     vars.PrevU   = new int[12];   // last logged node states, for change tracking
     vars.PrevC   = new int[12];
@@ -267,14 +271,24 @@ init
     };
     vars.ResolveQuestStates = resolveQuestStates;
 
-    Func<int, int> stateAtIdx = (idx) =>
+    // Read the state stored at a slot, but ONLY if that slot still holds the
+    // node we indexed. The quest manager is an actor: a level load can replace
+    // it, or rebuild its map, and the cached address then points at reused
+    // memory. Without this check we read arbitrary bytes, and any byte that
+    // happens to equal 1 looks exactly like "source validated".
+    Func<int, IntPtr, int> stateAtIdx = (idx, node) =>
     {
         try
         {
-            if (idx < 0 || (IntPtr)vars.QMgr == IntPtr.Zero) return -1;
+            if (idx < 0 || node == IntPtr.Zero || (IntPtr)vars.QMgr == IntPtr.Zero) return -1;
             IntPtr ns = game.ReadPointer((IntPtr)vars.QMgr + (int)vars.O_QM_NodesStates);
             if (ns == IntPtr.Zero) return -1;
-            return game.ReadValue<byte>(ns + (int)vars.MAP_STRIDE * idx + (int)vars.MAP_VALUE);
+
+            int stride = (int)vars.MAP_STRIDE;
+            if (game.ReadPointer(ns + stride * idx) != node) return -1;   // stale
+
+            int s = game.ReadValue<byte>(ns + stride * idx + (int)vars.MAP_VALUE);
+            return (s <= (int)vars.STATE_MAX) ? s : -1;                   // out of range
         }
         catch { return -1; }
     };
@@ -288,12 +302,21 @@ init
     // that survives a save load; the node asset is only a fallback.
     Func<int, bool, int> stateOf = (i, useConnected) =>
     {
+        IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : (IntPtr)vars.NodesU[i];
+
         if ((bool)vars.QMReady)
         {
-            int s = (int)vars.StateAtIdx(useConnected ? (int)vars.IdxC[i] : (int)vars.IdxU[i]);
+            int s = (int)vars.StateAtIdx(useConnected ? (int)vars.IdxC[i] : (int)vars.IdxU[i], node);
             if (s >= 0) return s;
+
+            // Slot no longer ours. Ask for a re-resolve and report "unknown"
+            // rather than falling back: the node asset's own CurrentState is
+            // session-local, so using it here would silently rebuild the
+            // baseline from wrong values.
+            vars.QMStale = true;
+            return -1;
         }
-        IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : (IntPtr)vars.NodesU[i];
+
         return (int)vars.NodeState(node);
     };
     vars.StateOf = stateOf;
@@ -360,6 +383,20 @@ init
 update
 {
     vars.Uhara.Update();
+
+    // A read found a slot that no longer holds its node: the manager was
+    // replaced or its map rebuilt. Drop the cache and resolve again rather
+    // than keep reading dead memory.
+    if ((bool)vars.QMStale)
+    {
+        vars.QMStale = false;
+        if ((bool)vars.QMReady)
+        {
+            vars.QMReady = false;
+            vars.QMgr = IntPtr.Zero;
+            vars.Uhara.Log("QuestManager went stale (slot no longer holds its node) - re-resolving.");
+        }
+    }
 
     if (!vars.NodesReady)
     {
