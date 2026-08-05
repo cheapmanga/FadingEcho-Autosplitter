@@ -214,6 +214,8 @@ init
     vars.IdxU    = new int[12];
     vars.QMReady = false;
     vars.LastQMTry = 0;
+    vars.PrevU   = new int[12];   // last logged node states, for change tracking
+    vars.PrevC   = new int[12];
 
     Func<bool> resolveQuestStates = () =>
     {
@@ -282,20 +284,25 @@ init
     // (activated in the world); "_C" is the Bastion connection. If a "_U" node
     // could not be resolved we fall back to its "_C" so the split is late
     // rather than missing entirely - the resolve log says when that happens.
-    Func<int, int> sourceState = (i) =>
+    // State of either node of source i. The quest manager's copy is the one
+    // that survives a save load; the node asset is only a fallback.
+    Func<int, bool, int> stateOf = (i, useConnected) =>
     {
-        IntPtr nodeU = (IntPtr)vars.NodesU[i];
-        bool useConnected = (bool)settings["OnConnected"] || nodeU == IntPtr.Zero;
-
-        // The quest manager's copy is the one that survives a save load.
         if ((bool)vars.QMReady)
         {
             int s = (int)vars.StateAtIdx(useConnected ? (int)vars.IdxC[i] : (int)vars.IdxU[i]);
             if (s >= 0) return s;
         }
-
-        IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : nodeU;
+        IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : (IntPtr)vars.NodesU[i];
         return (int)vars.NodeState(node);
+    };
+    vars.StateOf = stateOf;
+
+    Func<int, int> sourceState = (i) =>
+    {
+        bool useConnected = (bool)settings["OnConnected"]
+                         || (IntPtr)vars.NodesU[i] == IntPtr.Zero;
+        return (int)vars.StateOf(i, useConnected);
     };
     vars.SourceState = sourceState;
 
@@ -304,13 +311,7 @@ init
     {
         int n = 0;
         for (int i = 0; i < 12; i++)
-        {
-            int s = -1;
-            // Same: prefer the save-restored copy.
-            if ((bool)vars.QMReady) s = (int)vars.StateAtIdx((int)vars.IdxC[i]);
-            if (s < 0) s = (int)vars.NodeState((IntPtr)vars.NodesC[i]);
-            if (s == (int)vars.STATE_VALIDATED) n++;
-        }
+            if ((int)vars.StateOf(i, true) == (int)vars.STATE_VALIDATED) n++;
         return n;
     };
     vars.ConnectedCount = connectedCount;
@@ -341,6 +342,17 @@ init
         }
     };
     vars.Rebase = rebase;
+
+    // Seed the change tracker so the states just printed are not logged again.
+    Action seedPrev = () =>
+    {
+        for (int i = 0; i < 12; i++)
+        {
+            vars.PrevU[i] = (int)vars.StateOf(i, false);
+            vars.PrevC[i] = (int)vars.StateOf(i, true);
+        }
+    };
+    vars.SeedPrev = seedPrev;
 
     vars.Uhara.Log("=== Fading Echo autosplitter v4 (build 1.0.28121 offsets) ===");
 }
@@ -374,6 +386,7 @@ update
             if (missingU > 0)
                 vars.Uhara.Log("!! " + missingU + "/12 _U nodes unresolved - those sources "
                     + "fall back to splitting on connection. Report this log.");
+            vars.SeedPrev();
             // Only meaningful if a run is already under way.
             if (timer.CurrentPhase == TimerPhase.Running) vars.Rebase();
         }
@@ -389,6 +402,18 @@ update
             vars.Uhara.Log("QuestManager found (late) - reading save-restored node states.");
             for (int i = 0; i < 12; i++)
                 vars.Uhara.Log("  [" + i + "] " + vars.SourceNames[i] + "  state=" + vars.SourceState(i));
+
+            // The states we are about to read are not the ones the baseline was
+            // computed from: until now we were on the session-local copy, which
+            // reads 0 for work already done. Without re-baselining here, every
+            // source already done in the save looks like it was just activated
+            // and fires a burst of splits.
+            vars.SeedPrev();
+            if (timer.CurrentPhase == TimerPhase.Running)
+            {
+                vars.Uhara.Log("Re-baselining on the save-restored states.");
+                vars.Rebase();
+            }
         }
     }
 
@@ -398,6 +423,28 @@ update
         vars.Uhara.Log("LoadingStep: " + current.LoadingStep);
     if (old.CutsceneIndex != current.CutsceneIndex)
         vars.Uhara.Log("CutsceneIndex: " + current.CutsceneIndex);
+
+    // Log every node state change, split or not. Without this a source that
+    // fails to split is undiagnosable: you cannot tell "the game never
+    // validated the node" from "it did and the split logic missed it".
+    if (vars.NodesReady)
+    {
+        for (int i = 0; i < 12; i++)
+        {
+            int su = (int)vars.StateOf(i, false);
+            int sc = (int)vars.StateOf(i, true);
+            if (su != (int)vars.PrevU[i])
+            {
+                vars.Uhara.Log("NODE " + vars.SourceNames[i] + " _U: " + vars.PrevU[i] + " -> " + su);
+                vars.PrevU[i] = su;
+            }
+            if (sc != (int)vars.PrevC[i])
+            {
+                vars.Uhara.Log("NODE " + vars.SourceNames[i] + " _C: " + vars.PrevC[i] + " -> " + sc);
+                vars.PrevC[i] = sc;
+            }
+        }
+    }
 
     // Detect newly validated sources. Queued rather than split immediately so
     // two sources validating on the same tick still produce two splits.
