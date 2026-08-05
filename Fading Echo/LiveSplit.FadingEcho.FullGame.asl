@@ -223,6 +223,16 @@ init
         vars.SourceCount = already;
         vars.Pending.Clear();
         vars.Uhara.Log("Baseline: " + already + "/12 sources already done at run start.");
+
+        // Same idea for the final fight: if the run starts from a save where the
+        // 12 sources are already connected, the fight is long since open, so the
+        // moment has passed - do not fire the split on the spot.
+        int connected = vars.ConnectedCount();
+        if (connected >= 12)
+        {
+            vars.Splits.Add("FinalBoss");
+            vars.Uhara.Log("Baseline: 12/12 already connected, FinalBoss split consumed.");
+        }
     };
     vars.Rebase = rebase;
 
