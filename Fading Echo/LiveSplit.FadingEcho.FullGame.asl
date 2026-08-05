@@ -93,6 +93,22 @@ startup
     vars.O_NodeState       = 0x128;  // MF_Node_C::CurrentState (E_MF_State, 1 byte)
     vars.STATE_VALIDATED   = 1;      // E_MF_State: 0=Validable 1=Validated 2=Waiting
                                      //             3=Disabled  4=Failed    5=Asleep
+
+    // ---- TEMPORARY (test only) ------------------------------------------------
+    // MF_Node_C::CurrentState turned out to be SESSION-LOCAL: it starts at the
+    // asset default and is only updated for nodes that change during the current
+    // session. Loading a mid-game save leaves it at 0 for work already done, so
+    // both the baseline and the 12/12 boss condition read wrong. The persistent,
+    // save-restored copy lives in ABP_QuestManager_C::NodesStates, reached from
+    // the game mode - a path that exists at all times and needs no creation hook.
+    // Only needed to test the final boss split from a save; remove afterwards.
+    vars.O_World_GameMode  = 0x1A8;  // UWorld -> AuthorityGameMode
+    vars.O_GM_QuestCpt     = 0x408;  // BP_YgroGameMode::MF_QuestCpt
+    vars.O_QC_Managers     = 0x110;  // MF_QuestCpt::Managers (TMap data ptr)
+    vars.O_QM_NodesStates  = 0x308;  // BP_QuestManager::NodesStates (TMap data ptr)
+    // TMap element stride: TPair(8+8, or 8+1 padded to 16) + HashNextId + HashIndex.
+    vars.MAP_STRIDE        = 24;
+    vars.MAP_VALUE         = 8;      // value sits right after the 8-byte key
 }
 
 init
@@ -186,6 +202,81 @@ init
     };
     vars.NodeState = nodeState;
 
+    // ---- TEMPORARY (test only) ------------------------------------------------
+    // Locate the quest manager that owns our 12 sources and remember, for each
+    // node, its slot index in that manager's NodesStates map. We keep the index
+    // rather than the address so a map reallocation cannot leave us reading a
+    // stale slot. Remove this block, StateAtIdx and their uses afterwards.
+    vars.QMgr    = IntPtr.Zero;
+    vars.IdxC    = new int[12];
+    vars.IdxU    = new int[12];
+    vars.QMReady = false;
+    vars.LastQMTry = 0;
+
+    Func<bool> resolveQuestStates = () =>
+    {
+        try
+        {
+            if (!vars.NodesReady) return false;
+
+            IntPtr world = game.ReadPointer((IntPtr)vars.Utils.GWorld);
+            if (world == IntPtr.Zero) return false;
+            IntPtr gm = game.ReadPointer(world + (int)vars.O_World_GameMode);
+            if (gm == IntPtr.Zero) return false;
+            IntPtr qc = game.ReadPointer(gm + (int)vars.O_GM_QuestCpt);
+            if (qc == IntPtr.Zero) return false;
+
+            IntPtr mgrData = game.ReadPointer(qc + (int)vars.O_QC_Managers);
+            int mgrNum     = game.ReadValue<int>(qc + (int)vars.O_QC_Managers + 0x8);
+            if (mgrData == IntPtr.Zero || mgrNum <= 0 || mgrNum > 16) return false;
+
+            for (int i = 0; i < 12; i++) { vars.IdxC[i] = -1; vars.IdxU[i] = -1; }
+
+            int stride = (int)vars.MAP_STRIDE;
+            for (int m = 0; m < mgrNum; m++)
+            {
+                IntPtr mgr = game.ReadPointer(mgrData + stride * m + 0x8);
+                if (mgr == IntPtr.Zero) continue;
+
+                IntPtr ns = game.ReadPointer(mgr + (int)vars.O_QM_NodesStates);
+                int nsNum = game.ReadValue<int>(mgr + (int)vars.O_QM_NodesStates + 0x8);
+                if (ns == IntPtr.Zero || nsNum <= 0 || nsNum > 512) continue;
+
+                int hits = 0;
+                for (int e = 0; e < nsNum; e++)
+                {
+                    // Free slots in the sparse array hold link data, which can
+                    // never equal one of our node pointers, so they are harmless.
+                    IntPtr key = game.ReadPointer(ns + stride * e);
+                    if (key == IntPtr.Zero) continue;
+                    for (int i = 0; i < 12; i++)
+                    {
+                        if (key == (IntPtr)vars.NodesC[i]) { vars.IdxC[i] = e; hits++; }
+                        else if (key == (IntPtr)vars.NodesU[i]) { vars.IdxU[i] = e; hits++; }
+                    }
+                }
+                if (hits >= 12) { vars.QMgr = mgr; return true; }
+            }
+            return false;
+        }
+        catch { return false; }
+    };
+    vars.ResolveQuestStates = resolveQuestStates;
+
+    Func<int, int> stateAtIdx = (idx) =>
+    {
+        try
+        {
+            if (idx < 0 || (IntPtr)vars.QMgr == IntPtr.Zero) return -1;
+            IntPtr ns = game.ReadPointer((IntPtr)vars.QMgr + (int)vars.O_QM_NodesStates);
+            if (ns == IntPtr.Zero) return -1;
+            return game.ReadValue<byte>(ns + (int)vars.MAP_STRIDE * idx + (int)vars.MAP_VALUE);
+        }
+        catch { return -1; }
+    };
+    vars.StateAtIdx = stateAtIdx;
+    // ---- end TEMPORARY --------------------------------------------------------
+
     // State of source i for the moment the user picked. Default is "_U"
     // (activated in the world); "_C" is the Bastion connection. If a "_U" node
     // could not be resolved we fall back to its "_C" so the split is late
@@ -194,6 +285,14 @@ init
     {
         IntPtr nodeU = (IntPtr)vars.NodesU[i];
         bool useConnected = (bool)settings["OnConnected"] || nodeU == IntPtr.Zero;
+
+        // TEMPORARY: prefer the quest manager's copy, which survives a save load.
+        if ((bool)vars.QMReady)
+        {
+            int s = (int)vars.StateAtIdx(useConnected ? (int)vars.IdxC[i] : (int)vars.IdxU[i]);
+            if (s >= 0) return s;
+        }
+
         IntPtr node = useConnected ? (IntPtr)vars.NodesC[i] : nodeU;
         return (int)vars.NodeState(node);
     };
@@ -204,7 +303,13 @@ init
     {
         int n = 0;
         for (int i = 0; i < 12; i++)
-            if (vars.NodeState((IntPtr)vars.NodesC[i]) == (int)vars.STATE_VALIDATED) n++;
+        {
+            int s = -1;
+            // TEMPORARY: same, prefer the save-restored copy.
+            if ((bool)vars.QMReady) s = (int)vars.StateAtIdx((int)vars.IdxC[i]);
+            if (s < 0) s = (int)vars.NodeState((IntPtr)vars.NodesC[i]);
+            if (s == (int)vars.STATE_VALIDATED) n++;
+        }
         return n;
     };
     vars.ConnectedCount = connectedCount;
@@ -248,6 +353,12 @@ update
         if (vars.ResolveNodes())
         {
             vars.NodesReady = true;
+            // TEMPORARY: must run BEFORE the states are read or baselined below,
+            // otherwise a loaded save is baselined from session-local values.
+            vars.QMReady = vars.ResolveQuestStates();
+            vars.Uhara.Log(((bool)vars.QMReady)
+                ? "QuestManager found - reading save-restored node states."
+                : "!! QuestManager NOT found - falling back to session-local states.");
             int missingU = 0;
             vars.Uhara.Log("MissionFlow nodes resolved (12 sources). Splitting on "
                 + ((bool)settings["OnConnected"] ? "CONNECTION (_C)" : "ACTIVATION (_U)") + ".");
@@ -264,6 +375,19 @@ update
                     + "fall back to splitting on connection. Report this log.");
             // Only meaningful if a run is already under way.
             if (timer.CurrentPhase == TimerPhase.Running) vars.Rebase();
+        }
+    }
+    // TEMPORARY: the quest manager may spawn after the perk system; keep trying,
+    // but at most once a second - a full scan is thousands of reads.
+    else if (!(bool)vars.QMReady && Environment.TickCount - (int)vars.LastQMTry > 1000)
+    {
+        vars.LastQMTry = Environment.TickCount;
+        if (vars.ResolveQuestStates())
+        {
+            vars.QMReady = true;
+            vars.Uhara.Log("QuestManager found (late) - reading save-restored node states.");
+            for (int i = 0; i < 12; i++)
+                vars.Uhara.Log("  [" + i + "] " + vars.SourceNames[i] + "  state=" + vars.SourceState(i));
         }
     }
 
